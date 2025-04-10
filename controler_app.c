@@ -12,6 +12,9 @@
 #define BUFFER_SIZE 256
 #define MODULE_NAME "stick-controler"
 
+
+/* General data structs */
+
 typedef struct {
     int x;
     int y;
@@ -28,9 +31,12 @@ typedef struct {
     stick_data stick_2;
 } controler;
 
+
+// X11 variables
 static Display *display;
 static Window root;
 
+// Uinput variables for keyboard emulation
 int fd;
 
 void print_log(const char* action, const char* message);
@@ -38,24 +44,36 @@ char* read_from_device(const char* device_path);
 controler parse_data(const char* data, json_error_t* j_err);
 mouse_pose get_mouse_pose();
 
+/*
+This function reads data from stick and returns it in a struct.
+Input:
+    stick - struct containing the pin numbers for the x, y, and button inputs of the stick.
+Output: struct containing the x and y values of the stick, and the state of the button.
+*/
 void print_log(const char* action, const char* message) {
     printf("[%s] %s: %s\n", MODULE_NAME, action, message);
 }
 
+/*
+This function reads data from the device file and returns it as a string.
+Input:
+    device_path - path to the device file
+Output: string containing the data read from the device file.
+*/
 char* read_from_device(const char* device_path) {
     FILE *file;
     char *buffer;
     size_t bytes_read = 0;
     int ch;
 
-    // Allocate memory for the buffer to read data
+    // allocate memory for the buffer to read data
     buffer = (char*)malloc(BUFFER_SIZE);
     if (!buffer) {
         print_log("malloc", "allocation failed!");
         return NULL;
     }
 
-    // Open the device file (assumes it exists and is accessible)
+    // open the device file 
     file = fopen(device_path, "r");
     if (!file) {
         print_log("open", "device file not found!");
@@ -63,23 +81,28 @@ char* read_from_device(const char* device_path) {
         return NULL;
     }
 
-    // Read data from the device file until we encounter a newline or EOF
+    // read data from the device file
     while ((ch = fgetc(file)) != EOF && ch != '\n' && bytes_read < BUFFER_SIZE - 1) {
         buffer[bytes_read++] = (char)ch;
     }
 
-    // Null-terminate the buffer
     buffer[bytes_read] = '\0';
 
-    // print_log device file data
+    // log
     print_log("read", buffer);
 
-    // Clean up and close the file
     fclose(file);
 
     return buffer;
 }
 
+/*
+This function parses the JSON data and returns a controler struct.
+Input:
+    data - JSON string containing the data to be parsed
+    j_err - pointer to a json_error_t struct to store any parsing errors
+Output: controler struct containing the parsed data.
+*/
 controler parse_data(const char* data, json_error_t* j_err) {
     controler parsed_data = {0};  
 
@@ -127,27 +150,46 @@ controler parse_data(const char* data, json_error_t* j_err) {
     return parsed_data;
 }
 
+/*
+This function gets the current mouse position and returns it in a struct.
+Input: none
+Output: struct containing the x and y coordinates of the mouse.
+*/
 mouse_pose get_mouse_pose(){
     mouse_pose pose;
-
-    int x, y;
-
-
-    // Get the current mouse position
     Window child;
     unsigned int mask;
+    int x, y;
+
+    // get the current mouse position
     XQueryPointer(display, root, &child, &child, &pose.x, &pose.y, &x, &y, &mask);
 
     return pose;
 }
 
+/*
+This function moves the mouse to the specified x and y coordinates.
+Input:
+    x - x coordinate to move the mouse to
+    y - y coordinate to move the mouse to
+Output: none
+*/
 void move_mouse(int x, int y) {
     XWarpPointer(display, None, root, 0, 0, 0, 0, x, y);
     XFlush(display);  // Flush the display to apply the move
 }
 
+/*
+This function handles mouse movement based on the stick data.
+Input:
+    stick - struct containing the x and y values of the stick
+Output: none
+*/
 void handle_mouse(stick_data stick) {
+    // get the current mouse position
     mouse_pose pose = get_mouse_pose();
+
+    // adjust the stick values to control the mouse movement
     if (stick.x * stick.x < 2500) {
         stick.x = 0;
     }
@@ -157,10 +199,17 @@ void handle_mouse(stick_data stick) {
     stick.x /= -20;
     stick.y /= 20;
 
+    // move
     move_mouse(pose.x + stick.x, pose.y + stick.y);
-    //sleep(0.1);
 }
 
+/*
+This function presses a key on the virtual keyboard.
+Input:
+    fd - file descriptor for the uinput device
+    keycode - keycode of the key to be pressed
+Output: none
+*/
 void press_key(int fd, int keycode) {
     struct input_event ev = {0};
     gettimeofday(&ev.time, NULL);
@@ -178,6 +227,13 @@ void press_key(int fd, int keycode) {
     write(fd, &ev, sizeof(ev));
 }
 
+/*
+This function releases a key on the virtual keyboard.
+Input:
+    fd - file descriptor for the uinput device
+    keycode - keycode of the key to be released
+Output: none
+*/
 void release_key(int fd, int keycode){
     struct input_event ev = {0};
     gettimeofday(&ev.time, NULL);
@@ -195,7 +251,14 @@ void release_key(int fd, int keycode){
     write(fd, &ev, sizeof(ev));
 }
 
+/*
+This function handles key presses based on the stick data.
+Input:
+    stick - struct containing the x and y values of the stick
+Output: none
+*/
 void handle_keys(stick_data stick) {
+    // adjust the stick values to control the key presses
     if (stick.x * stick.x < 2500) {
         stick.x = 0;
     }
@@ -203,6 +266,7 @@ void handle_keys(stick_data stick) {
         stick.y = 0;
     }
 
+    // handle button presses (Right & Left)
     if (stick.x < 0) {
         release_key(fd, KEY_LEFT);
         press_key(fd, KEY_RIGHT);
@@ -214,6 +278,7 @@ void handle_keys(stick_data stick) {
         release_key(fd, KEY_RIGHT);
     }
 
+    // handle button presses (Up & Down)
     if (stick.y > 0) {
         release_key(fd, KEY_UP);
         press_key(fd, KEY_DOWN);
@@ -227,16 +292,22 @@ void handle_keys(stick_data stick) {
     }
 }
 
-
 int main() {
-    print_log("init", "Program started");
+    json_error_t j_err;
+    controler data;
+    char *device_data;
+
+    print_log("init", "controler-app started!");
 
     display = XOpenDisplay(NULL);
-    // Get the root window
+
+    // get the root window
     root = DefaultRootWindow(display);
 
 
-    // init keyboard
+    /**********************\
+    |* init keyboard data *|
+    \**********************/
 
     fd = open("/dev/uinput", O_WRONLY | O_NONBLOCK);
     if (fd < 0) {
@@ -244,16 +315,16 @@ int main() {
         return 1;
     }
 
-    // Enable events and keys
+    // enable events and keys
     ioctl(fd, UI_SET_EVBIT, EV_KEY);
     ioctl(fd, UI_SET_KEYBIT, KEY_LEFT);
     ioctl(fd, UI_SET_KEYBIT, KEY_RIGHT);
     ioctl(fd, UI_SET_KEYBIT, KEY_UP);
     ioctl(fd, UI_SET_KEYBIT, KEY_DOWN);
 
-    // Create virtual device
+    // create virtual device
     struct uinput_user_dev uidev = {0};
-    snprintf(uidev.name, UINPUT_MAX_NAME_SIZE, "my-virtual-keyboard");
+    snprintf(uidev.name, UINPUT_MAX_NAME_SIZE, "virt-keyboard");
     uidev.id.bustype = BUS_USB;
     uidev.id.vendor = 0x1234;
     uidev.id.product = 0xfedc;
@@ -262,14 +333,14 @@ int main() {
     write(fd, &uidev, sizeof(uidev));
     ioctl(fd, UI_DEV_CREATE);
 
-
-
-
-    // Read data from the device
-    json_error_t j_err;
-    controler data;
-    char *device_data;
-
+    /* 
+    *   controler loop: 
+    *   1. read data from the device
+    *   2. parse the data
+    *   3. handle the keys and mouse
+    *   4. free the data
+    *   5. repeat
+    */
     while(1==1) {
         device_data = read_from_device(DEVICE_PATH);
         data = parse_data(device_data, &j_err);
@@ -279,9 +350,7 @@ int main() {
         free(device_data);
     }
 
-    // Clean up
-
-    print_log("exit", "Program finished");
+    print_log("exit", "controler-app finished");
 
     return 0;
 }

@@ -2,7 +2,7 @@ CC = gcc
 LDFLAGS = -ljansson -lX11
 
 all:
-	$(CC) -o contorler_app contorler_app.c $(LDFLAGS)
+	$(CC) -o controler_app controler_app.c $(LDFLAGS)
 
 clean:
-	rm -f contorler_app
+	rm -f controler_app
